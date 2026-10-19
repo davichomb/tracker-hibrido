@@ -14,6 +14,7 @@ Pensada para usarse con una mano, entre series, desde el teléfono.
 - **Cardio 4×4** — temporizador por fases (calentamiento, 4 intervalos, recuperaciones, vuelta a la calma) y registro de velocidad, inclinación, frecuencia cardíaca y esfuerzo percibido.
 - **Progreso** — tendencia de peso corporal y dominadas por semana, con aviso cuando la fatiga sugiere reducir volumen.
 - **Copia de seguridad** — exportar e importar todo el historial como archivo JSON.
+- **Se comporta como una app** — el botón atrás del móvil vuelve a la pantalla anterior y cierra ventanas; al reabrirla retoma la sesión, el ejercicio y el descanso donde los dejaste; los temporizadores siguen la hora real aunque bloquees el móvil; la pantalla no se apaga mientras entrenas; y abre sin conexión.
 
 ## Privacidad
 
@@ -21,7 +22,7 @@ Toda la información se guarda en el `localStorage` del navegador, en el propio 
 
 - No hay servidor, base de datos ni cuenta de usuario.
 - No hay analítica, rastreo ni publicidad.
-- La app no realiza ninguna petición de red: la política de seguridad del documento incluye `connect-src 'none'`, que se lo impide a nivel de navegador.
+- La app no envía datos a ningún sitio: la política de seguridad del documento incluye `connect-src 'none'`, que se lo impide a nivel de navegador. La única petición es la del propio `sw.js`, que descarga de su misma dirección la versión nueva de la app para poder abrirla sin conexión.
 - El nombre y el peso objetivo se piden al abrir la app por primera vez y nunca salen del dispositivo.
 
 La app usa las tipografías del sistema: no descarga nada externo.
@@ -34,7 +35,7 @@ Se puede abrir directamente el archivo `index.html`, pero para instalarla como a
 2. Abre la URL en Chrome (Android) o Safari (iOS).
 3. Menú del navegador → **Instalar app** o **Añadir a pantalla de inicio**.
 
-Queda con icono propio y se abre en pantalla completa. Todo el código va incrustado en un solo archivo, así que funciona sin conexión.
+Queda con icono propio y se abre en pantalla completa. Todo el código va incrustado en un solo archivo y `sw.js` guarda una copia en el teléfono, así que funciona sin conexión. Las actualizaciones se descargan en segundo plano y se ven la siguiente vez que abres la app.
 
 ## Detalles técnicos
 

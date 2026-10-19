@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
+import { createHash } from "node:crypto";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
@@ -38,4 +39,8 @@ const html = [
 ].join("\n");
 
 writeFileSync(join(root, "index.html"), html);
+
+// sw.js lleva la huella de esta compilación: así el teléfono detecta que hay versión nueva.
+const version = createHash("sha256").update(html).digest("hex").slice(0, 12);
+writeFileSync(join(root, "sw.js"), read("src/sw.js").replace('const CACHE = "th-__VERSION__";', `const CACHE = "th-${version}";`));
 console.log(`index.html · ${(html.length / 1024).toFixed(0)} KB · ${Object.keys(img).length} fotos`);

@@ -320,9 +320,23 @@ const { useState, useEffect, useRef, useMemo } = React,
   // Fecha local (no UTC): una sesión o comida de las 21:00 cuenta para hoy, no para mañana.
   isoDate = (d = new Date()) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+  buzz = (p) => {
+    try {
+      (!navigator.userActivation || navigator.userActivation.hasBeenActive) && navigator.vibrate && navigator.vibrate(p);
+    } catch {}
+  },
+  audio = { ctx: null },
+  unlockAudio = () => {
+    try {
+      audio.ctx || (audio.ctx = new (window.AudioContext || window.webkitAudioContext)());
+      audio.ctx.state === "suspended" && audio.ctx.resume();
+    } catch {}
+  },
+  _unlockOnTap = typeof document < "u" && document.addEventListener("pointerdown", () => unlockAudio(), { passive: !0 }),
   beep = () => {
     try {
-      const e = new (window.AudioContext || window.webkitAudioContext)(),
+      unlockAudio();
+      const e = audio.ctx,
         a = e.createOscillator(),
         t = e.createGain();
       (a.connect(t),
@@ -331,8 +345,14 @@ const { useState, useEffect, useRef, useMemo } = React,
         (t.gain.value = 0.15),
         a.start(),
         a.stop(e.currentTime + 0.35));
+      setTimeout(() => {
+        try {
+          const o2 = e.createOscillator(), g2 = e.createGain();
+          (o2.connect(g2), g2.connect(e.destination), (o2.frequency.value = 880), (g2.gain.value = 0.15), o2.start(), o2.stop(e.currentTime + 0.35));
+        } catch {}
+      }, 450);
     } catch {}
-    navigator.vibrate && navigator.vibrate([220, 90, 220]);
+    buzz([220, 90, 220]);
   },
   // Foto de un ejercicio. id puede ser una clave, una lista (superserie: fotos lado a lado) o null.
   // Sin foto fiable se pinta una tarjeta neutra con una mancuerna, nunca la foto de otro ejercicio.
@@ -432,7 +452,7 @@ const { useState, useEffect, useRef, useMemo } = React,
       },
       e,
     ),
-  PrimaryButton = ({ children: e, onClick: a, disabled: t, tone: i = "dark", style: r }) => {
+  PrimaryButton = ({ children: e, onClick: a, disabled: t, tone: i = "dark", style: r, noArrow: na }) => {
     const s = t ? T.surfaceMuted : i === "accent" ? T.accent : T.primary,
       o = t ? T.mut : "#FFFFFF";
     return React.createElement(
@@ -463,7 +483,7 @@ const { useState, useEffect, useRef, useMemo } = React,
         onPointerLeave: (l) => (l.currentTarget.style.transform = "scale(1)"),
       },
       React.createElement("span", null, e),
-      React.createElement(
+      !na && React.createElement(
         "span",
         {
           "aria-hidden": "true",
@@ -572,6 +592,7 @@ const { useState, useEffect, useRef, useMemo } = React,
         type: "number",
         inputMode: "decimal",
         min: 0,
+        step: "any",
         value: e,
         placeholder: t,
         "aria-label": s || t,
@@ -687,75 +708,109 @@ const { useState, useEffect, useRef, useMemo } = React,
       },
       e,
     );
-function RestOverlay({ seconds: e, onClose: a }) {
-  const [t, i] = useState(e),
-    [r, s] = useState(e),
-    o = t <= 0;
-  return (
+/* ---------- Comportamiento de app en el móvil ---------- */
+// Botón atrás: cada ventana abierta (hoja, descanso) es una "capa". Atrás cierra la capa de arriba;
+// sin capas, vuelve a la pantalla anterior. Si una capa se cierra con un botón, se retira su entrada del historial.
+// BOOT marca las entradas del historial creadas en este arranque: tras una recarga, las antiguas se saltan.
+const BOOT = Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+  NAV = { layers: [], ignore: 0, after: null },
+  useBackLayer = (onBack) => {
+    const ref = useRef(onBack);
+    ref.current = onBack;
     useEffect(() => {
-      if (o) {
-        beep();
-        return;
-      }
-      const l = setInterval(() => i((b) => b - 1), 1e3);
-      return () => clearInterval(l);
-    }, [o]),
-    React.createElement(
-      "div",
-      {
-        role: "dialog",
-        "aria-label": "Descanso entre series",
-        style: {
-          position: "fixed",
-          inset: 0,
-          zIndex: 60,
-          background: T.bg,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 24,
-          animation: `enter 350ms ${T.ease} both`,
+      const layer = { byBack: !1, fn: () => ((layer.byBack = !0), ref.current()) };
+      try {
+        const st = history.state || {};
+        history.pushState({ ...st, layer: (st.layer || 0) + 1, idx: (st.idx || 0) + 1 }, "");
+      } catch {}
+      NAV.layers.push(layer);
+      return () => {
+        const q = NAV.layers.indexOf(layer);
+        q >= 0 && NAV.layers.splice(q, 1);
+        if (!layer.byBack) (NAV.ignore++, history.back());
+      };
+    }, []);
+  },
+  // Mantiene la pantalla encendida mientras entrenas (sesión, cardio, descanso).
+  useWakeLock = (on) =>
+    useEffect(() => {
+      if (!on || !("wakeLock" in navigator)) return;
+      let lock = null,
+        dead = !1;
+      const get = async () => {
+          try {
+            lock = await navigator.wakeLock.request("screen");
+          } catch {}
         },
-      },
-      React.createElement(Label, { style: { marginBottom: 26 } }, o ? "Siguiente serie" : "Descanso"),
-      React.createElement(
-        Ring,
-        { size: 275, progress: o ? 0 : t / r, stroke: 10, color: o ? T.ok : T.primary },
-        React.createElement(
-          "div",
-          { style: { ...TYPE.display, fontSize: 64, color: T.text } },
-          o ? "Ya" : fmtTime(t),
-        ),
-      ),
-      React.createElement(
-        "div",
-        { style: { display: "flex", gap: 10, marginTop: 34, width: "100%", maxWidth: 340 } },
-        !o &&
-          React.createElement(
-            QuietButton,
-            {
-              onClick: () => {
-                (i((l) => l + 30), s((l) => l + 30));
-              },
-            },
-            "+30 s",
-          ),
-        React.createElement(PrimaryButton, { onClick: a }, o ? "Continuar" : "Saltar descanso"),
-      ),
-    )
+        vis = () => document.visibilityState === "visible" && !dead && get();
+      get();
+      document.addEventListener("visibilitychange", vis);
+      return () => {
+        ((dead = !0), document.removeEventListener("visibilitychange", vis), lock && lock.release().catch(() => {}));
+      };
+    }, [on]),
+  // Reloj que se refresca cada 250 ms y al volver a la app (los temporizadores van por hora real, no por "ticks").
+  useNow = (on) => {
+    const [now, setNow] = useState(Date.now);
+    useEffect(() => {
+      if (!on) return;
+      const tick = () => setNow(Date.now()),
+        id = setInterval(tick, 250);
+      document.addEventListener("visibilitychange", tick);
+      return () => (clearInterval(id), document.removeEventListener("visibilitychange", tick));
+    }, [on]);
+    return now;
+  };
+
+// Descanso entre series. Cuenta contra una hora de fin: si bloqueas el móvil o sales de la app,
+// al volver muestra el tiempo real que queda.
+function RestOverlay({ rest: e, onClose: a, onExtend: t }) {
+  const now = useNow(!0),
+    left = Math.max(0, Math.ceil((e.end - now) / 1e3)),
+    o = left <= 0,
+    beeped = useRef(!1);
+  (useBackLayer(a), useWakeLock(!o));
+  useEffect(() => {
+    o && !beeped.current && Date.now() - e.end < 5e3 && ((beeped.current = !0), beep());
+  }, [o]);
+  return (
+    <div
+      role="dialog"
+      aria-label="Descanso entre series"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        background: T.bg,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        animation: `enter 350ms ${T.ease} both`,
+      }}
+    >
+      <Label style={{ marginBottom: 26 }}>{o ? "Siguiente serie" : "Descanso"}</Label>
+      <Ring size={275} progress={o ? 0 : left / e.total} stroke={10} color={o ? T.ok : T.primary}>
+        <div style={{ ...TYPE.display, fontSize: 64, color: T.text }}>{o ? "Ya" : fmtTime(left)}</div>
+      </Ring>
+      <div style={{ display: "flex", gap: 10, marginTop: 34, width: "100%", maxWidth: 340 }}>
+        {!o && <QuietButton onClick={t}>+30 s</QuietButton>}
+        <PrimaryButton onClick={a}>{o ? "Continuar" : "Saltar"}</PrimaryButton>
+      </div>
+    </div>
   );
 }
 // Una serie: carga, repeticiones y ✓ en la primera línea; RIR debajo, con botones a tamaño de dedo.
 // Cabe en móviles de 320 px sin desbordar la tarjeta.
-function SetRow({ n: e, data: a, onChange: t, onDone: i }) {
+function SetRow({ n: e, data: a, onChange: t, onDone: i, hint: h = {}, timed: tm }) {
   const r = a || {};
   return (
     <div style={{ padding: "12px 0", borderTop: e === 1 ? "none" : `1px solid ${T.line}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ width: 24, flexShrink: 0, ...TYPE.label, fontSize: 10, color: r.done ? T.ok : T.mut }}>S{e}</span>
-        <NumInput value={r.kg ?? ""} onChange={(s) => t({ ...r, kg: s })} placeholder="0" suffix="kg" grow ariaLabel={`Carga serie ${e}`} />
-        <NumInput value={r.reps ?? ""} onChange={(s) => t({ ...r, reps: s })} placeholder="0" suffix="rep" grow ariaLabel={`Repeticiones serie ${e}`} />
+        {!tm && <NumInput value={r.kg ?? ""} onChange={(s) => t({ ...r, kg: s })} placeholder={h.kg || "0"} suffix="kg" grow ariaLabel={`Carga serie ${e}`} />}
+        <NumInput value={r.reps ?? ""} onChange={(s) => t({ ...r, reps: s })} placeholder={h.reps || "0"} suffix={tm ? "seg" : "rep"} grow ariaLabel={tm ? `Segundos serie ${e}` : `Repeticiones serie ${e}`} />
         <button
           onClick={i}
           aria-label={r.done ? `Desmarcar serie ${e}` : `Marcar serie ${e} como hecha`}
@@ -777,7 +832,7 @@ function SetRow({ n: e, data: a, onChange: t, onDone: i }) {
           ✓
         </button>
       </div>
-      <div role="group" aria-label={`RIR serie ${e}`} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 32 }}>
+      {!tm && <div role="group" aria-label={`RIR serie ${e}`} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, paddingLeft: 32 }}>
         <span style={{ ...TYPE.label, color: T.mut, width: 26, flexShrink: 0 }}>RIR</span>
         {[0, 1, 2, 3].map((s) => (
           <button
@@ -800,7 +855,7 @@ function SetRow({ n: e, data: a, onChange: t, onDone: i }) {
             {s}
           </button>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -808,7 +863,9 @@ const parseSetCount = (e) => {
   const a = /^(\d+)\s*×/.exec(e || "");
   return a ? parseInt(a[1], 10) : 3;
 };
-function ExerciseCard({ ex: e, week: a, data: t, onData: i, onRest: r }) {
+// prev: lo que registraste en este ejercicio la semana anterior (mismo día). Sirve de referencia:
+// aparece en gris en cada serie y, si marcas ✓ sin escribir, se apunta ese valor.
+function ExerciseCard({ ex: e, week: a, data: t, onData: i, onRest: r, prev: pv }) {
   const [s, o] = useState(!1),
     l = e.special === "pullups",
     b = e.special === "assist",
@@ -821,11 +878,22 @@ function ExerciseCard({ ex: e, week: a, data: t, onData: i, onRest: r }) {
       const p = [...f];
       ((p[S] = c), i({ ...t, sets: p }));
     },
+    timed = /\d\s*s\b/.test(e.scheme || ""),
+    ps = (pv && pv.sets) || [],
+    hintOf = (S) => {
+      const before = f[S - 1] || {},
+        last = ps[S] || {};
+      return { kg: String(before.kg || last.kg || ""), reps: String(last.reps || before.reps || "") };
+    },
     k = (S) => {
       const c = f[S] || {},
+        h = hintOf(S),
         p = [...f];
-      ((p[S] = { ...c, done: !c.done }), i({ ...t, sets: p }), c.done || r(e.rest));
-    };
+      ((p[S] = c.done ? { ...c, done: !1 } : { ...c, kg: c.kg || (timed ? c.kg : h.kg) || c.kg, reps: c.reps || h.reps || c.reps, done: !0 }),
+        i({ ...t, sets: p }),
+        c.done || (buzz(12), r(e.rest)));
+    },
+    lastWeek = ps.filter((q) => q && (q.kg || q.reps)).map((q) => (timed ? `${q.reps} s` : q.kg ? `${q.kg}×${q.reps || "?"}` : `${q.reps} rep`));
   return React.createElement(
     "div",
     { style: { animation: `enter 350ms ${T.ease} both` } },
@@ -988,11 +1056,20 @@ function ExerciseCard({ ex: e, week: a, data: t, onData: i, onRest: r }) {
       : React.createElement(
           Card,
           { minHeight: 0, pad: 18 },
+          lastWeek.length > 0 &&
+            React.createElement(
+              "div",
+              { style: { ...TYPE.body, fontSize: 12.5, color: T.mut, marginBottom: 6 } },
+              "Semana pasada: ",
+              React.createElement("b", { style: { color: T.text, fontWeight: 600 } }, lastWeek.join(" · ")),
+            ),
           Array.from({ length: y }).map((S, c) =>
             React.createElement(SetRow, {
               key: c,
               n: c + 1,
               data: f[c],
+              hint: hintOf(c),
+              timed,
               onChange: (p) => d(c, p),
               onDone: () => k(c),
             }),
@@ -1006,6 +1083,7 @@ function ExerciseCard({ ex: e, week: a, data: t, onData: i, onRest: r }) {
         value: t.note || "",
         onChange: (S) => i({ ...t, note: S.target.value }),
         placeholder: "Sensaciones, ajustes de carga, técnica…",
+        "aria-label": "Notas del ejercicio",
         rows: 2,
         style: {
           marginTop: 8,
@@ -1014,7 +1092,7 @@ function ExerciseCard({ ex: e, week: a, data: t, onData: i, onRest: r }) {
           border: "none",
           background: "transparent",
           color: T.text,
-          font: `400 14px/1.5 ${T.font}`,
+          font: `400 16px/1.5 ${T.font}`,
           resize: "vertical",
           outline: "none",
           padding: 0,
@@ -1050,11 +1128,37 @@ const stepBtn = {
       },
       e,
     );
-function SessionView({ dayKey: e, week: a, log: t, setLog: i, onFinish: r, onBack: s }) {
+// sessKey identifica la sesión (semana + día): el ejercicio en curso, el calentamiento y el descanso
+// se guardan con ella para retomarlos tal cual al volver a abrir la app.
+function SessionView({ dayKey: e, week: a, log: t, setLog: i, onFinish: r, onBack: s, sessKey: sk }) {
   const o = ROUTINE[e],
-    [l, b] = useState(0),
-    [y, f] = useState(null),
-    [x, u] = useState(!0),
+    saved = (() => {
+      const v = lsGet("ui:sess");
+      return v && v.key === sk ? v : {};
+    })(),
+    savedRest = (() => {
+      const v = lsGet("ui:rest");
+      return v && v.key === sk && v.end > Date.now() - 6e4 ? v : null;
+    })(),
+    [l, setIdx] = useState(() => Math.min(Math.max(0, saved.idx || 0), o.exercises.length - 1)),
+    [y, setRest] = useState(savedRest),
+    // El calentamiento se muestra al empezar; desaparece al pasar de ejercicio o si ya hay series registradas.
+    [x, setWarm] = useState(() => saved.warm !== !1 && !Object.keys(t.ex || {}).length),
+    b = (n) => (setIdx(n), setWarm(!1), window.scrollTo({ top: 0, behavior: "smooth" })),
+    prevLog = lsGet(`log:w${a - 1}:d${e}`),
+    f = (sec) => {
+      const v = { key: sk, end: Date.now() + sec * 1e3, total: sec };
+      (setRest(v), lsSet("ui:rest", v));
+    },
+    closeRest = () => {
+      (setRest(null), lsSet("ui:rest", null));
+    },
+    extendRest = () =>
+      setRest((v) => {
+        const nv = { ...v, end: Math.max(v.end, Date.now()) + 3e4, total: v.total + 30 };
+        return (lsSet("ui:rest", nv), nv);
+      }),
+    u = (v) => setWarm(v),
     m = o.exercises,
     d = m[l],
     k = (t.ex && t.ex[d.id]) || {},
@@ -1064,6 +1168,8 @@ function SessionView({ dayKey: e, week: a, log: t, setLog: i, onFinish: r, onBac
       return n.special === "pullups" ? (g.pullTotal || 0) > 0 : (g.sets || []).some((I) => I && I.done);
     },
     p = m.filter(c).length;
+  useEffect(() => lsSet("ui:sess", { key: sk, idx: l, warm: x }), [l, x, sk]);
+  useWakeLock(!0);
   return React.createElement(
     React.Fragment,
     null,
@@ -1148,7 +1254,7 @@ function SessionView({ dayKey: e, week: a, log: t, setLog: i, onFinish: r, onBac
             ),
           ),
         ),
-      React.createElement(ExerciseCard, { ex: d, week: a, data: k, onData: S, onRest: f }),
+      React.createElement(ExerciseCard, { key: d.id, ex: d, week: a, data: k, onData: S, onRest: f, prev: prevLog && prevLog.ex ? prevLog.ex[d.id] : null }),
       React.createElement(
         "div",
         {
@@ -1187,7 +1293,21 @@ function SessionView({ dayKey: e, week: a, log: t, setLog: i, onFinish: r, onBac
       ),
       React.createElement(
         "div",
-        { style: { display: "flex", gap: 10 } },
+        {
+          style: {
+            display: "flex",
+            gap: 10,
+            position: "sticky",
+            bottom: 0,
+            zIndex: 30,
+            margin: "0 -14px",
+            padding: "10px 14px calc(10px + env(safe-area-inset-bottom))",
+            background: "rgba(245,245,247,0.92)",
+            backdropFilter: "saturate(180%) blur(18px)",
+            WebkitBackdropFilter: "saturate(180%) blur(18px)",
+            borderTop: `1px solid ${T.line}`,
+          },
+        },
         React.createElement(
           QuietButton,
           { onClick: () => b(Math.max(0, l - 1)), disabled: l === 0, style: { flex: 0.7 } },
@@ -1198,7 +1318,7 @@ function SessionView({ dayKey: e, week: a, log: t, setLog: i, onFinish: r, onBac
           : React.createElement(PrimaryButton, { onClick: r, tone: "accent" }, "Terminar sesión"),
       ),
     ),
-    y !== null && React.createElement(RestOverlay, { seconds: y, onClose: () => f(null) }),
+    y && React.createElement(RestOverlay, { rest: y, onClose: closeRest, onExtend: extendRest }),
   );
 }
 const CARDIO_PHASES = [
@@ -1217,31 +1337,42 @@ const CARDIO_PHASES = [
   { label: "Intervalo 4", dur: 240, zone: "85–95% FCmáx", hot: !0 },
   { label: "Vuelta a la calma", dur: 300, zone: "Reduce gradualmente", tip: "No te detengas bruscamente" },
 ];
+// El temporizador del 4×4 va por hora real (endAt): si se bloquea el móvil o sales de la app,
+// al volver está en la fase y el segundo correctos. El estado se guarda en el registro de la sesión.
+const phaseDur = (n) => (n < CARDIO_PHASES.length ? CARDIO_PHASES[n].dur : 0);
 function CardioView({ week: e, log: a, setLog: t, onFinish: i, onBack: r }) {
-  const [s, o] = useState(a.phase || 0),
-    [l, b] = useState(a.left ?? CARDIO_PHASES[0].dur),
-    [y, f] = useState(!1),
+  const tm = a.timer || { phase: a.phase || 0, left: a.left ?? CARDIO_PHASES[0].dur, endAt: null },
+    y = !!tm.endAt,
+    now = useNow(y),
+    lastBeep = useRef(0);
+  let s = tm.phase,
+    end = tm.endAt;
+  if (y) for (; s < CARDIO_PHASES.length && now >= end; ) (s++, (end += phaseDur(s) * 1e3));
+  const l = s >= CARDIO_PHASES.length ? 0 : y ? Math.max(0, Math.ceil((end - now) / 1e3)) : tm.left,
     x = CARDIO_PHASES[s],
-    u = s >= CARDIO_PHASES.length;
-  (useEffect(() => {
-    if (!y || u) return;
-    const c = setInterval(
-      () =>
-        b((p) => {
-          if (p <= 1) {
-            beep();
-            const n = s + 1;
-            return (o(n), n < CARDIO_PHASES.length ? CARDIO_PHASES[n].dur : 0);
-          }
-          return p - 1;
-        }),
-      1e3,
-    );
-    return () => clearInterval(c);
-  }, [y, s, u]),
-    useEffect(() => {
-      t({ ...a, phase: s, left: l });
-    }, [s]));
+    u = s >= CARDIO_PHASES.length,
+    setTimer = (v) => t({ ...a, timer: v, phase: v.phase }),
+    toggle = () =>
+      y ? setTimer({ phase: s, left: l, endAt: null }) : setTimer({ phase: s, left: l, endAt: Date.now() + l * 1e3 }),
+    [undo, setUndo] = useState(null),
+    skip = () => {
+      const n = s + 1,
+        before = { phase: s, left: l, endAt: y ? Date.now() + l * 1e3 : null };
+      setTimer({ phase: n, left: phaseDur(n), endAt: y && n < CARDIO_PHASES.length ? Date.now() + phaseDur(n) * 1e3 : null });
+      setUndo({ ...before, t: Date.now() });
+    };
+  useEffect(() => {
+    if (!undo) return;
+    const id = setTimeout(() => setUndo(null), 5e3);
+    return () => clearTimeout(id);
+  }, [undo]);
+  // Al cambiar de fase en directo: pitido y se guarda la fase nueva.
+  useEffect(() => {
+    if (!y || s === tm.phase) return;
+    (Date.now() - lastBeep.current > 2e3 && now - (end - phaseDur(s) * 1e3) < 3e3 && ((lastBeep.current = Date.now()), beep()),
+      setTimer({ phase: s, left: l, endAt: u ? null : end }));
+  }, [s]);
+  useWakeLock(y);
   const m = a.intervals || [{}, {}, {}, {}],
     d = (c, p, n) => t({ ...a, intervals: m.map((g, I) => (I === c ? { ...g, [p]: n } : g)) }),
     k = a.checks || {},
@@ -1294,19 +1425,18 @@ function CardioView({ week: e, log: a, setLog: t, onFinish: i, onBack: r }) {
           { style: { display: "flex", gap: 10, marginBottom: 16 } },
           React.createElement(
             PrimaryButton,
-            { onClick: () => f(!y) },
+            { onClick: toggle, noArrow: !0 },
             y ? "Pausar" : s === 0 && l === CARDIO_PHASES[0].dur ? "Iniciar" : "Reanudar",
           ),
           React.createElement(
             QuietButton,
             {
               style: { flex: 0.55 },
-              onClick: () => {
-                const c = s + 1;
-                (o(c), b(c < CARDIO_PHASES.length ? CARDIO_PHASES[c].dur : 0));
-              },
+              onClick: undo
+                ? () => Date.now() - undo.t > 700 && (setTimer({ phase: undo.phase, left: undo.left, endAt: undo.endAt ? Date.now() + undo.left * 1e3 : null }), setUndo(null))
+                : skip,
             },
-            "Saltar",
+            undo ? "Deshacer" : "Saltar",
           ),
         ),
       React.createElement(
@@ -1466,11 +1596,14 @@ function CardioView({ week: e, log: a, setLog: t, onFinish: i, onBack: r }) {
     ),
   );
 }
+// Lo que escribes se guarda como borrador (ui:checkin) por si cierras la app antes de guardar.
 function CheckinView({ onSave: e, onSkip: a }) {
-  const [t, i] = useState(null),
-    [r, s] = useState(""),
-    [o, l] = useState(""),
-    [b, y] = useState("");
+  const draft = lsGet("ui:checkin") || {},
+    [t, i] = useState(draft.energia ?? null),
+    [r, s] = useState(draft.sueno || ""),
+    [o, l] = useState(draft.peso || ""),
+    [b, y] = useState(draft.molestias || "");
+  useEffect(() => lsSet("ui:checkin", { energia: t, sueno: r, peso: o, molestias: b }), [t, r, o, b]);
   return React.createElement(
     React.Fragment,
     null,
@@ -1581,7 +1714,7 @@ function CheckinView({ onSave: e, onSkip: a }) {
             background: T.surfaceMuted,
             border: "1px solid transparent",
             color: T.text,
-            font: `400 14px/1 ${T.font}`,
+            font: `400 16px/1 ${T.font}`,
             outline: "none",
           },
         }),
@@ -1589,7 +1722,7 @@ function CheckinView({ onSave: e, onSkip: a }) {
       React.createElement(
         "div",
         { style: { display: "flex", gap: 10 } },
-        React.createElement(QuietButton, { onClick: a, style: { flex: 0.55 } }, "Omitir"),
+        React.createElement(QuietButton, { onClick: a, style: { flex: 0.7 } }, "Omitir datos"),
         React.createElement(
           PrimaryButton,
           { onClick: () => e({ energia: t, sueno: r, peso: o, molestias: b }) },
@@ -1635,7 +1768,7 @@ function WeightLogger({ weights: e, onAdd: a }) {
           background: T.surfaceMuted,
           border: "1px solid transparent",
           color: T.text,
-          font: `500 14px/1 ${T.font}`,
+          font: `500 16px/1 ${T.font}`,
           outline: "none",
         },
       }),
@@ -1903,7 +2036,7 @@ function SetupView({ profile: e, first: a, onSave: t, onClose: i, onExport: r, o
       background: T.surfaceMuted,
       border: "1px solid transparent",
       color: T.text,
-      font: `400 15px/1 ${T.font}`,
+      font: `400 16px/1 ${T.font}`,
       outline: "none",
     };
   return React.createElement(
@@ -2518,7 +2651,8 @@ function Toast({ toast, onAction }) {
   );
 }
 
-function Sheet({ title, onClose, children }) {
+function Sheet({ title, onClose, children, dirty }) {
+  useBackLayer(onClose);
   useEffect(() => {
     const k = (ev) => ev.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
@@ -2526,7 +2660,7 @@ function Sheet({ title, onClose, children }) {
   }, [onClose]);
   return (
     <div
-      onClick={onClose}
+      onClick={() => dirty || onClose()}
       style={{
         position: "fixed",
         inset: 0,
@@ -2580,7 +2714,7 @@ const fieldStyle = {
   background: T.surfaceMuted,
   border: "1px solid transparent",
   color: T.text,
-  font: `400 15px/1 ${T.font}`,
+  font: `400 16px/1 ${T.font}`,
   outline: "none",
 };
 
@@ -2753,7 +2887,7 @@ function MealSheet({ meal: e, entry: a, date: t, onClose: i, onSave: r, onUnmark
     [adj, setAdj] = useState((a && a.adj) || { p: base.p ?? "", g: base.g ?? "", c: base.c ?? "" }),
     changed = !!note.trim() || MACROS.some(([k]) => num(adj[k]) !== num(base[k]));
   return (
-    <Sheet title={e.name} onClose={i}>
+    <Sheet title={e.name} onClose={i} dirty={changed}>
       <div style={{ ...TYPE.body, color: T.mut, marginTop: -8, marginBottom: 14 }}>
         {fmtDay(t)}
         {hasMacros(e) ? ` · Plan: ${macroLine(e)}` : ""}
@@ -2777,7 +2911,7 @@ function MealSheet({ meal: e, entry: a, date: t, onClose: i, onSave: r, onUnmark
           placeholder="Ej.: pollo en vez de pavo, media ración de arroz…"
           rows={2}
           aria-label="Qué cambiaste"
-          style={{ ...fieldStyle, height: "auto", padding: 12, marginTop: 10, resize: "vertical", font: `400 15px/1.4 ${T.font}` }}
+          style={{ ...fieldStyle, height: "auto", padding: 12, marginTop: 10, resize: "vertical", font: `400 16px/1.4 ${T.font}` }}
         />
         <div style={{ ...TYPE.body, color: T.mut, margin: "12px 0 8px" }}>Macros reales (opcional)</div>
         <MacroInputs value={adj} onChange={setAdj} />
@@ -2819,7 +2953,7 @@ function ExtraSheet({ onClose: e, onAdd: a }) {
     [m, setM] = useState({ p: "", g: "", c: "" }),
     ok = name.trim() || hasMacros(m);
   return (
-    <Sheet title="Fuera del plan" onClose={e}>
+    <Sheet title="Fuera del plan" onClose={e} dirty={!!ok}>
       <div style={{ ...TYPE.body, color: T.mut, marginTop: -8, marginBottom: 14 }}>Un snack, una comida libre o un extra: suma a los totales del día.</div>
       <Card minHeight={0} pad={16} style={{ marginBottom: 10 }}>
         <Label>Qué fue</Label>
@@ -3190,8 +3324,37 @@ function App() {
       (setPlanState(next), lsSet("nutri:plan", next));
       recToday && typeof recToday === "object" && putRec(td, recToday, next.targets);
     },
+    // Navegación: go = pantalla nueva encima (atrás vuelve), swap = sustituye la actual, back = atrás.
+    // Las pestañas que no son Entreno se apilan sobre Entreno: atrás desde ellas vuelve a Entreno y luego sale.
+    curView = useRef("home"),
+    selDayRef = useRef(o),
+    pendingY = useRef(null),
+    go = (v) => {
+      const run = () => {
+        try {
+          const st = history.state || {};
+          (history.replaceState({ ...st, y: window.scrollY, d: selDayRef.current, boot: BOOT }, ""),
+            history.pushState({ v, d: selDayRef.current, boot: BOOT, idx: (st.idx || 0) + 1 }, ""));
+        } catch {}
+        (i(v), window.scrollTo(0, 0));
+      };
+      NAV.layers.length ? (NAV.after = run) : run();
+    },
+    swap = (v) => {
+      try {
+        history.replaceState({ v, d: selDayRef.current, boot: BOOT, idx: (history.state && history.state.idx) || 0 }, "");
+      } catch {}
+      (i(v), window.scrollTo(0, 0));
+    },
+    back = () => history.back(),
+    // Primer arranque: Ajustes es la pantalla base (no hay nada debajo), así que se sustituye por Entreno.
+    firstRun = useRef(!1),
+    leaveSetup = () => (firstRun.current ? ((firstRun.current = !1), swap("home")) : back()),
     setTab = (tb) => {
-      (tb === "nutrition" && setNDate(isoDate()), lsSet("ui:tab", tb), i(tb), window.scrollTo(0, 0));
+      if (tb === "nutrition") setNDate(isoDate());
+      lsSet("ui:tab", tb);
+      if (tb === curView.current) return window.scrollTo({ top: 0, behavior: "smooth" });
+      curView.current === "home" ? go(tb) : tb === "home" ? back() : swap(tb);
     },
     snapOf = (ml) => ({ name: ml.name, p: ml.p, g: ml.g, c: ml.c }),
     toggleMeal = (dt, ml) => {
@@ -3200,7 +3363,7 @@ function App() {
         done = { ...(rec.done || {}) };
       prev ? delete done[ml.id] : (done[ml.id] = { t: Date.now(), snap: snapOf(ml) });
       putRec(dt, { ...rec, done });
-      navigator.vibrate && navigator.vibrate(12);
+      buzz(12);
       showToast(prev ? `Marca quitada: ${ml.name}` : `Comida hecha: ${ml.name} ✓`, "Deshacer", () => {
         const r2 = getRec(dt),
           d2 = { ...(r2.done || {}) };
@@ -3239,7 +3402,7 @@ function App() {
     },
     applyPreset = (n) => {
       savePlan({ ...plan, meals: MEAL_PRESETS[n].map((nm) => ({ id: uid(), name: nm, when: "all", p: "", g: "", c: "" })) });
-      showToast(`Listo: ${n} comidas. Añade sus gramos cuando quieras.`, "Mi plan", () => i("plan"));
+      showToast(`Listo: ${n} comidas. Añade sus gramos cuando quieras.`, "Mi plan", () => go("plan"));
     },
     deleteMeal = (ml) => {
       const before = plan;
@@ -3303,10 +3466,72 @@ function App() {
         }
         x(C || []);
         const F = await store.get("profile"),
-          lastTab = lsGet("ui:tab");
-        (F ? (k(F), ["home", "nutrition", "progress"].includes(lastTab) && i(lastTab)) : i("setup"), a(!0));
+          lastTab = lsGet("ui:tab"),
+          rt = lsGet("ui:route"),
+          fresh = rt && rt.date === isoDate() && Date.now() - rt.at < 8 * 3600e3,
+          baseIdx = (history.state && history.state.idx) || 0,
+          push = (v, d) => {
+            try {
+              const st = history.state || {};
+              history.pushState({ v, d, boot: BOOT, idx: (st.idx || 0) + 1 }, "");
+            } catch {}
+          };
+        try {
+          const resume = fresh && ROUTINE[rt.d] ? rt.d : todayKey();
+          history.replaceState({ v: F ? "home" : "setup", d: resume, boot: BOOT, idx: baseIdx }, "");
+        } catch {}
+        if (!F) ((firstRun.current = !0), i("setup"));
+        else {
+          k(F);
+          if (fresh && ["session", "cardio", "checkin"].includes(rt.v) && ROUTINE[rt.d] && !ROUTINE[rt.d].rest) {
+            const wk = (h && h.week) || 1,
+              lg = await store.get(`log:w${wk}:d${rt.d}`);
+            (l(rt.d), (selDayRef.current = rt.d), m(lg || {}), (loadedKey.current = `log:w${wk}:d${rt.d}`), push(rt.v, rt.d), i(rt.v));
+          } else if (fresh && rt.v === "plan") (push("nutrition"), push("plan"), i("plan"));
+          else if (rt && rt.date === isoDate() && ["nutrition", "progress"].includes(lastTab)) (push(lastTab), i(lastTab));
+        }
+        a(!0);
       })();
     }, []));
+  useEffect(() => {
+    const onPop = (ev) => {
+      if (NAV.ignore > 0) {
+        NAV.ignore--;
+        const after = NAV.after;
+        return ((NAV.after = null), after && after());
+      }
+      if (NAV.layers.length) return NAV.layers[NAV.layers.length - 1].fn();
+      const st = ev.state || {};
+      if (!st.v || st.boot !== BOOT) {
+        if ((st.idx || 0) > 0) return history.go(-st.idx);
+        try {
+          history.replaceState({ v: "home", d: selDayRef.current, boot: BOOT, idx: 0 }, "");
+        } catch {}
+        return i("home");
+      }
+      // Atrás en el check-in: la sesión cuenta igual (con lo que hubieras escrito).
+      curView.current === "checkin" && st.v !== "checkin" && checkinSave.current && checkinSave.current(lsGet("ui:checkin") || {});
+      pendingY.current = st.y || 0;
+      st.d != null && ROUTINE[st.d] && l(st.d);
+      if (["session", "cardio", "checkin"].includes(st.v)) {
+        const key = `log:w${weekRef.current}:d${st.d}`;
+        loadedKey.current = null;
+        return store.get(key).then((lg) => (m(lg || {}), (loadedKey.current = key), i(st.v)));
+      }
+      i(st.v);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    ((curView.current = t), (selDayRef.current = o));
+    e && t !== "setup" && lsSet("ui:route", { v: t, d: o, date: isoDate(), at: Date.now() });
+    e && ["home", "nutrition", "progress"].includes(t) && lsSet("ui:tab", t);
+  }, [t, o, e]);
+  React.useLayoutEffect(() => {
+    pendingY.current != null && (window.scrollTo(0, pendingY.current), (pendingY.current = null));
+  }, [t]);
+  useWakeLock(t === "session" || t === "cardio");
   const n = async (h, v) => {
       const F = [...f.filter((L) => L.d !== h), { d: h, v: Math.round(v * 10) / 10 }].sort((L, w) =>
         L.d < w.d ? -1 : 1,
@@ -3316,24 +3541,23 @@ function App() {
     g = (h) => {
       (s(h), store.set("meta", { week: h }));
     },
-    I = useRef(null);
+    loadedKey = useRef(null),
+    checkinSave = useRef(null),
+    weekRef = useRef(1);
+  weekRef.current = r;
+  // Cada cambio de la sesión se guarda al momento, y solo si es el registro de esa sesión (nunca uno vacío o de otro día).
   useEffect(() => {
-    if (!(t !== "session" && t !== "cardio"))
-      return (
-        clearTimeout(I.current),
-        (I.current = setTimeout(() => store.set(p, u), 500)),
-        () => clearTimeout(I.current)
-      );
+    (t === "session" || t === "cardio") && loadedKey.current === p && store.set(p, u);
   }, [u, t, p]);
   const $ = async () => {
       const h = await store.get(p);
-      (m(h || {}), i(ROUTINE[o].cardio ? "cardio" : "session"));
+      (m(h || {}), (loadedKey.current = p), go(ROUTINE[o].cardio ? "cardio" : "session"));
     },
-    B = () => i("checkin"),
+    B = () => (lsSet("ui:rest", null), swap("checkin")),
     P = async (h) => {
-      (k(h), await store.set("profile", h), i("home"));
+      (k(h), await store.set("profile", h), leaveSetup());
     },
-    M = async (h) => {
+    M = async (h, stay) => {
       const v = u.ex && (u.ex.pullups || null),
         C = {
           w: r,
@@ -3350,7 +3574,9 @@ function App() {
       const L = parseFloat(String(h.peso || "").replace(",", "."));
       (isFinite(L) && L > 0 && (await n(C.date, L)),
         await store.set(p, { ...u, checkin: h, done: !0 }),
-        i("home"));
+        lsSet("ui:checkin", null),
+        lsSet("ui:sess", null),
+        stay || back());
     },
     // Copia de seguridad: todo lo que la app guarda (claves th:*), incluida la nutrición.
     A = async () => {
@@ -3380,12 +3606,13 @@ function App() {
           v.store.weights && x(v.store.weights),
           setPlanState(loadPlan()),
           setNRev((q) => q + 1),
-          i("home"),
+          leaveSetup(),
           showToast("Datos restaurados correctamente"));
       } catch {
         showToast("Ese archivo no es una copia de Tracker Híbrido. Elige el .json que exportaste desde la app.");
       }
     };
+  checkinSave.current = (h) => M(h, !0);
   if (!e)
     return (
       <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", color: T.mut, fontFamily: T.font, fontSize: 13 }}>
@@ -3397,6 +3624,9 @@ function App() {
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text, fontFamily: T.font }}>
       <style>{`
         *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
+        html{touch-action:manipulation}
+        button{-webkit-user-select:none;user-select:none;touch-action:manipulation}
+        img{-webkit-touch-callout:none}
         body{margin:0;background:${T.bg}}
         input::placeholder,textarea::placeholder{color:${T.mut};opacity:.75}
         input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
@@ -3420,7 +3650,7 @@ function App() {
           onStart={$}
           onProgress={() => setTab("progress")}
           profile={d}
-          onSettings={() => i("setup")}
+          onSettings={() => go("setup")}
           mealBar={<NextMealBar info={todayInfo} onToggle={(ml) => toggleMeal(today, ml)} onOpen={() => setTab("nutrition")} />}
         />
       )}
@@ -3438,24 +3668,24 @@ function App() {
           onAddExtra={(xx) => addExtra(nDate, xx)}
           onRemoveExtra={(xx) => removeExtra(nDate, xx)}
           onPreset={applyPreset}
-          onEditPlan={() => (i("plan"), window.scrollTo(0, 0))}
+          onEditPlan={() => go("plan")}
         />
       )}
-      {t === "plan" && <PlanView plan={plan} onChange={savePlan} onDeleteMeal={deleteMeal} onBack={() => (i("nutrition"), window.scrollTo(0, 0))} />}
+      {t === "plan" && <PlanView plan={plan} onChange={savePlan} onDeleteMeal={deleteMeal} onBack={back} />}
       {t === "setup" && (
         <SetupView
           profile={d}
           first={!d.name && !d.goal && b.length === 0}
           onSave={P}
-          onClose={() => i("home")}
+          onClose={back}
           onExport={A}
           onImport={z}
           persisted={S}
         />
       )}
-      {t === "session" && <SessionView dayKey={o} week={r} log={u} setLog={m} onFinish={B} onBack={() => i("home")} />}
-      {t === "cardio" && <CardioView week={r} log={u} setLog={m} onFinish={B} onBack={() => i("home")} />}
-      {t === "checkin" && <CheckinView onSave={M} onSkip={() => i("home")} />}
+      {t === "session" && <SessionView dayKey={o} week={r} log={u} setLog={m} onFinish={B} onBack={back} sessKey={p} />}
+      {t === "cardio" && <CardioView week={r} log={u} setLog={m} onFinish={B} onBack={back} />}
+      {t === "checkin" && <CheckinView onSave={M} onSkip={() => M({})} />}
       {t === "progress" && <ProgressView summary={b} week={r} profile={d} weights={f} onAddWeight={n} />}
       {tabbed && <TabBar tab={t} onTab={setTab} />}
       <Toast toast={toast} onAction={runToast} />

@@ -11,6 +11,11 @@
     var url = URL.createObjectURL(new Blob([JSON.stringify(m)],{type:"application/manifest+json"}));
     var l=document.createElement("link"); l.rel="manifest"; l.href=url; document.head.appendChild(l);
   } catch(e){}
+  // Copia para usar sin conexión (solo en https o en local).
+  try {
+    if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1"))
+      window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
+  } catch(e){}
   if (location.protocol === "file:") {
     window.addEventListener("load", function(){
       var b=document.createElement("div");
