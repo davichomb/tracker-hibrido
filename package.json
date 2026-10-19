@@ -1,0 +1,12 @@
+{
+  "name": "tracker-hibrido",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "serve": "node tools/serve.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}

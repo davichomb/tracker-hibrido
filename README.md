@@ -6,7 +6,8 @@ Pensada para usarse con una mano, entre series, desde el teléfono.
 
 ## Qué hace
 
-- **Sesión guiada** — un ejercicio a la vez, con ilustración, series × repeticiones y RIR objetivo.
+- **Comidas** — objetivos diarios del plan nutricional (día de entreno 170 g proteína · 85 g grasas · 190 g carbohidratos = 2.205 kcal; día de descanso 170 · 85 · 150 = 2.045 kcal). Cada comida se marca con un toque —también desde la pantalla de inicio— y se deshace con otro. Admite "hecha con cambios", extras fuera del plan, días pasados, cambiar un día de entreno a descanso y resumen de los últimos 7 días. Las comidas y sus gramos se editan en **Mi plan**.
+- **Sesión guiada** — un ejercicio a la vez, con foto, series × repeticiones y RIR objetivo. Si no hay una foto fiable del ejercicio se muestra una tarjeta neutra, nunca la foto de otro; las fotos de una variante (p. ej. con mancuernas) llevan una etiqueta que lo dice.
 - **Registro por serie** — carga en kg, repeticiones y RIR real, más notas por ejercicio.
 - **Temporizador de descanso** — arranca solo al marcar una serie, con aviso sonoro y vibración.
 - **Progresión de dominadas** — contador con el objetivo semanal, en versión estricta y asistida con banda.
@@ -23,7 +24,7 @@ Toda la información se guarda en el `localStorage` del navegador, en el propio 
 - La app no realiza ninguna petición de red: la política de seguridad del documento incluye `connect-src 'none'`, que se lo impide a nivel de navegador.
 - El nombre y el peso objetivo se piden al abrir la app por primera vez y nunca salen del dispositivo.
 
-La única descarga externa son las tipografías desde Google Fonts. Si prefieres evitarla, elimina la línea `@import` de Google Fonts en el archivo: la app seguirá funcionando con tipografías del sistema.
+La app usa las tipografías del sistema: no descarga nada externo.
 
 ## Instalación
 
@@ -37,7 +38,20 @@ Queda con icono propio y se abre en pantalla completa. Todo el código va incrus
 
 ## Detalles técnicos
 
-Un único archivo HTML autónomo, sin build ni dependencias externas. React 18 va empaquetado dentro. El código fuente sin compilar está en `tracker-hibrido.jsx`.
+`index.html` es un único archivo autónomo (React 18, la app y las fotos van incrustados). Se genera a partir de:
+
+- `src/app.jsx` — código de la app.
+- `img/*.webp` — fotos de ejercicios (generadas con IA, en blanco y negro, sin metadatos); cada ejercicio la referencia por su nombre de archivo (campo `img`).
+- `src/head.html`, `src/manifest.js`, `src/vendor/` — cabecera, manifiesto de instalación y React.
+
+Para regenerarlo tras un cambio (requiere Node.js):
+
+```bash
+npm install
+npm run build
+```
+
+`npm run serve` lo sirve en http://127.0.0.1:8790 para probarlo en el navegador.
 
 ## Aviso
 
